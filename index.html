@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Early Clock-In Warning Bucketing Tool</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F7F6F3; color: #1A1A1A; min-height: 100vh; padding: 40px 24px; }
+  .container { max-width: 960px; margin: 0 auto; }
+  .header { margin-bottom: 36px; }
+  .header-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #E24B4A; display: inline-block; }
+  .header h1 { font-size: 26px; font-weight: 600; color: #111; margin-bottom: 4px; }
+  .header p { font-size: 13px; color: #888; line-height: 1.6; }
+  .month-badge { display: inline-block; margin-top: 8px; background: #EEF2FF; color: #4A5AE8; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; }
+  .step-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: #AAA; margin-bottom: 10px; }
+  .drop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+
+  .drop-card { background: #fff; border: 1.5px dashed #D8D5CF; border-radius: 12px; padding: 24px 16px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; position: relative; overflow: hidden; }
+  .drop-card input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; z-index: 1; }
+  .drop-card .clear-btn { position: absolute; top: 8px; right: 10px; background: none; border: none; font-size: 18px; color: #CCC; cursor: pointer; display: none; z-index: 2; line-height: 1; padding: 2px 5px; border-radius: 4px; }
+  .drop-card .clear-btn:hover { color: #888; background: #F0EEE9; }
+  .drop-card.loaded .clear-btn { display: block; }
+  .drop-card:hover { background: #FAFAF8; border-color: #BBB; }
+  .drop-card.dragover { background: #F0F4FF; border-color: #4A5AE8; border-style: solid; }
+  .drop-card.loaded { border-style: solid; }
+  .drop-card.main.loaded { border-color: #4A5AE8; background: #F5F7FF; }
+  .drop-card.w1.loaded   { border-color: #BA7517; background: #FFF9F0; }
+  .drop-card.w2.loaded   { border-color: #E24B4A; background: #FFF5F5; }
+  .drop-card.w3.loaded   { border-color: #7F77DD; background: #F8F7FF; }
+  .drop-icon { font-size: 26px; margin-bottom: 8px; display: block; }
+  .drop-card-title { font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+  .drop-card.main .drop-card-title { color: #4A5AE8; }
+  .drop-card.w1   .drop-card-title { color: #BA7517; }
+  .drop-card.w2   .drop-card-title { color: #E24B4A; }
+  .drop-card.w3   .drop-card-title { color: #7F77DD; }
+  .drop-hint { font-size: 11px; color: #BBB; }
+  .drop-hint.ok.main { color: #4A5AE8; font-weight: 500; }
+  .drop-hint.ok.w1   { color: #BA7517; font-weight: 500; }
+  .drop-hint.ok.w2   { color: #E24B4A; font-weight: 500; }
+  .drop-hint.ok.w3   { color: #7F77DD; font-weight: 500; }
+  .drop-subhint { font-size: 10px; color: #CCC; margin-top: 3px; }
+
+  .run-btn { width: 100%; padding: 13px; background: #111; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; transition: background 0.15s; margin-bottom: 24px; }
+  .run-btn:hover { background: #333; }
+  .error-box { display: none; margin-bottom: 16px; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #991B1B; }
+
+  #results { display: none; }
+  .bucket-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .bucket-card { background: #fff; border: 1.5px solid #E8E6E1; border-radius: 10px; padding: 14px 10px; text-align: center; cursor: pointer; transition: border-color 0.15s; }
+  .bucket-card:hover { border-color: #ccc; }
+  .bucket-card.active-1st { border-color: #BA7517; }
+  .bucket-card.active-2nd { border-color: #E24B4A; }
+  .bucket-card.active-3rd { border-color: #7F77DD; }
+  .bucket-card.active-esc { border-color: #1A1A1A; }
+  .bucket-num { font-size: 28px; font-weight: 600; line-height: 1; }
+  .bucket-num.c1 { color: #BA7517; } .bucket-num.c2 { color: #E24B4A; }
+  .bucket-num.c3 { color: #7F77DD; } .bucket-num.ce { color: #1A1A1A; }
+  .bucket-name { font-size: 10px; color: #AAA; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+  .table-card { background: #fff; border: 1px solid #E8E6E1; border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+  .table-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #F0EEE9; }
+  .table-title { font-size: 13px; font-weight: 600; color: #111; }
+
+  .export-actions { display: flex; gap: 8px; }
+  .btn { font-size: 11px; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; border: 1px solid #E8E6E1; background: #F7F6F3; color: #333; transition: background 0.15s; white-space: nowrap; }
+  .btn:hover { background: #EDEBE6; }
+  .btn-primary { background: #111; color: #fff; border-color: #111; }
+  .btn-primary:hover { background: #333; border-color: #333; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px 14px; color: #AAA; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #F0EEE9; background: #FAFAF8; }
+  td { padding: 9px 14px; border-bottom: 1px solid #F7F6F3; color: #222; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #FAFAF8; }
+  .td-email { color: #4A5AE8; } .td-mins { color: #BA7517; font-weight: 500; } .td-muted { color: #888; }
+  .empty-state { display: none; text-align: center; padding: 36px; font-size: 12px; color: #BBB; }
+
+  /* CSV export box */
+  .csv-export-box { display: none; background: #fff; border: 1px solid #E8E6E1; border-radius: 10px; overflow: hidden; }
+  .csv-export-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #F0EEE9; background: #FAFAF8; }
+  .csv-export-label { font-size: 11px; color: #888; font-weight: 500; }
+  .csv-textarea { width: 100%; font-family: 'Courier New', monospace; font-size: 10.5px; color: #444; background: #fff; border: none; padding: 14px 16px; resize: none; height: 160px; outline: none; }
+  .copy-success { font-size: 11px; color: #16a34a; display: none; }
+
+  .instructions { margin-top: 32px; padding: 20px 24px; background: #fff; border: 1px solid #E8E6E1; border-radius: 10px; }
+  .instructions h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #AAA; margin-bottom: 12px; }
+  .instructions ol { padding-left: 18px; }
+  .instructions li { font-size: 12px; color: #555; line-height: 2; }
+  .instructions li strong { color: #111; }
+
+  @media (max-width: 640px) { .drop-grid { grid-template-columns: 1fr; } .bucket-grid { grid-template-columns: repeat(2,1fr); } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-eyebrow"><span class="dot"></span> Trust & Safety · Fraud Detection</div>
+    <h1>Early Clock-In Warning Bucketing</h1>
+    <p>Drop your four CSV exports below. Filters to current and previous month, deduplicates to each worker's latest shift, and assigns the correct warning tier.</p>
+    <span class="month-badge" id="month-range-label"></span>
+  </div>
+
+  <div class="step-label">Step 1 — Drop your CSV files</div>
+  <div class="drop-grid">
+    <div class="drop-card main" id="zone-main" ondragover="onDragOver(event,'main')" ondragleave="onDragLeave('main')" ondrop="onDrop(event,'main')">
+      <input type="file" accept=".csv" id="input-main" onchange="onFileInput(event,'main')" />
+      <button class="clear-btn" onclick="clearZone(event,'main')">×</button>
+      <span class="drop-icon" id="icon-main">📄</span>
+      <div class="drop-card-title">Main export</div>
+      <div class="drop-hint" id="hint-main">Fraud detection dashboard CSV</div>
+      <div class="drop-subhint" id="sub-main">drag & drop or click to browse</div>
+    </div>
+    <div class="drop-card w1" id="zone-w1" ondragover="onDragOver(event,'w1')" ondragleave="onDragLeave('w1')" ondrop="onDrop(event,'w1')">
+      <input type="file" accept=".csv" id="input-w1" onchange="onFileInput(event,'w1')" />
+      <button class="clear-btn" onclick="clearZone(event,'w1')">×</button>
+      <span class="drop-icon" id="icon-w1">📄</span>
+      <div class="drop-card-title">1st warning table</div>
+      <div class="drop-hint" id="hint-w1">Workers with 1st warning</div>
+      <div class="drop-subhint" id="sub-w1">drag & drop or click to browse</div>
+    </div>
+    <div class="drop-card w2" id="zone-w2" ondragover="onDragOver(event,'w2')" ondragleave="onDragLeave('w2')" ondrop="onDrop(event,'w2')">
+      <input type="file" accept=".csv" id="input-w2" onchange="onFileInput(event,'w2')" />
+      <button class="clear-btn" onclick="clearZone(event,'w2')">×</button>
+      <span class="drop-icon" id="icon-w2">📄</span>
+      <div class="drop-card-title">2nd warning table</div>
+      <div class="drop-hint" id="hint-w2">Workers with 2nd warning</div>
+      <div class="drop-subhint" id="sub-w2">drag & drop or click to browse</div>
+    </div>
+    <div class="drop-card w3" id="zone-w3" ondragover="onDragOver(event,'w3')" ondragleave="onDragLeave('w3')" ondrop="onDrop(event,'w3')">
+      <input type="file" accept=".csv" id="input-w3" onchange="onFileInput(event,'w3')" />
+      <button class="clear-btn" onclick="clearZone(event,'w3')">×</button>
+      <span class="drop-icon" id="icon-w3">📄</span>
+      <div class="drop-card-title">3rd warning table</div>
+      <div class="drop-hint" id="hint-w3">Workers with 3rd warning</div>
+      <div class="drop-subhint" id="sub-w3">drag & drop or click to browse · can be empty</div>
+    </div>
+  </div>
+
+  <div class="step-label">Step 2 — Run</div>
+  <button class="run-btn" onclick="runBucketing()">Run bucketing →</button>
+  <div class="error-box" id="error-box"></div>
+
+  <div id="results">
+    <div class="step-label" style="margin-bottom:10px;">Step 3 — Review &amp; export</div>
+    <div class="bucket-grid">
+      <div class="bucket-card" id="tab-1st" onclick="showTab('1st')"><div class="bucket-num c1" id="cnt-1st">0</div><div class="bucket-name">1st warning</div></div>
+      <div class="bucket-card" id="tab-2nd" onclick="showTab('2nd')"><div class="bucket-num c2" id="cnt-2nd">0</div><div class="bucket-name">2nd warning</div></div>
+      <div class="bucket-card" id="tab-3rd" onclick="showTab('3rd')"><div class="bucket-num c3" id="cnt-3rd">0</div><div class="bucket-name">3rd warning</div></div>
+      <div class="bucket-card" id="tab-esc" onclick="showTab('esc')"><div class="bucket-num ce" id="cnt-esc">0</div><div class="bucket-name">escalate</div></div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-header">
+        <span class="table-title" id="table-label"></span>
+        <div class="export-actions">
+          <button class="btn" onclick="showCSVExport()">Show CSV</button>
+          <button class="btn btn-primary" onclick="downloadCSV()">↓ Download CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Latest shift date</th><th>Mins clocked in early</th><th>Risk shifts (90d)</th></tr></thead>
+          <tbody id="result-body"></tbody>
+        </table>
+        <div class="empty-state" id="empty-state">No workers in this bucket</div>
+      </div>
+    </div>
+
+    <!-- CSV export fallback -->
+    <div class="csv-export-box" id="csv-export-box">
+      <div class="csv-export-header">
+        <span class="csv-export-label">📋 CSV output — select all and copy into a new spreadsheet</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="copy-success" id="copy-success">✓ Copied!</span>
+          <button class="btn btn-primary" onclick="copyCSV()">Copy all</button>
+          <button class="btn" onclick="document.getElementById('csv-export-box').style.display='none'">Hide</button>
+        </div>
+      </div>
+      <textarea class="csv-textarea" id="csv-textarea" readonly onclick="this.select()"></textarea>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <h3>How to use this tool each cycle</h3>
+    <ol>
+      <li>Export the <strong>main fraud detection table</strong> and all three <strong>warning tables</strong> as CSVs from your dashboard</li>
+      <li>Drop each file into its zone above (or click to browse), then hit <strong>Run bucketing</strong></li>
+      <li>Review each bucket — only shifts from <strong>this month and last month</strong> are included</li>
+      <li>Use <strong>Download CSV</strong> or <strong>Show CSV → Copy all</strong> to get the output into your email service</li>
+      <li>After sending emails, <strong>move workers up</strong> into the next warning tier in your source so history stays accurate for next run</li>
+    </ol>
+  </div>
+
+</div>
+<script>
+  (function() {
+    const now = new Date();
+    const M = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const cur = M[now.getMonth()], prev = M[now.getMonth() === 0 ? 11 : now.getMonth() - 1];
+    document.getElementById('month-range-label').textContent = 'Filtering: ' + prev + ' + ' + cur + ' ' + now.getFullYear();
+  })();
+
+  const csvData = { main: null, w1: null, w2: null, w3: null };
+  let buckets = { '1st':[], '2nd':[], '3rd':[], 'esc':[] };
+  let activeTab = '1st';
+
+  const defaultHints = { main:'Fraud detection dashboard CSV', w1:'Workers with 1st warning', w2:'Workers with 2nd warning', w3:'Workers with 3rd warning' };
+  const defaultSubs  = { main:'drag & drop or click to browse', w1:'drag & drop or click to browse', w2:'drag & drop or click to browse', w3:'drag & drop or click to browse · can be empty' };
+
+  function onDragOver(e, id) { e.preventDefault(); document.getElementById('zone-'+id).classList.add('dragover'); }
+  function onDragLeave(id)   { document.getElementById('zone-'+id).classList.remove('dragover'); }
+  function onDrop(e, id)     { e.preventDefault(); onDragLeave(id); const f = e.dataTransfer.files[0]; if(f) loadFile(f, id); }
+  function onFileInput(e,id) { const f = e.target.files[0]; if(f) loadFile(f, id); }
+
+  function clearZone(e, id) {
+    e.stopPropagation(); e.preventDefault();
+    csvData[id] = null;
+    document.getElementById('zone-'+id).classList.remove('loaded');
+    document.getElementById('icon-'+id).textContent = '📄';
+    const h = document.getElementById('hint-'+id); h.textContent = defaultHints[id]; h.className = 'drop-hint';
+    const s = document.getElementById('sub-'+id); s.textContent = defaultSubs[id]; s.style.display = '';
+    document.getElementById('input-'+id).value = '';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('error-box').style.display = 'none';
+  }
+
+  function loadFile(file, id) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const text = e.target.result;
+      const rows = parseCSV(text);
+      csvData[id] = text;
+      document.getElementById('zone-'+id).classList.add('loaded');
+      document.getElementById('icon-'+id).textContent = '✅';
+      const h = document.getElementById('hint-'+id);
+      h.textContent = file.name + ' · ' + rows.length + ' rows';
+      h.className = 'drop-hint ok ' + id;
+      document.getElementById('sub-'+id).style.display = 'none';
+      document.getElementById('results').style.display = 'none';
+      document.getElementById('error-box').style.display = 'none';
+      document.getElementById('csv-export-box').style.display = 'none';
+    };
+    reader.readAsText(file);
+  }
+
+  function parseCSV(text) {
+    if (!text.trim()) return [];
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,'').toLowerCase());
+    return lines.slice(1).map(line => {
+      const vals = []; let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') inQ = !inQ;
+        else if (line[i] === ',' && !inQ) { vals.push(cur); cur = ''; }
+        else cur += line[i];
+      }
+      vals.push(cur);
+      const obj = {};
+      headers.forEach((h,i) => { obj[h] = (vals[i]||'').replace(/^"|"$/g,'').trim(); });
+      return obj;
+    }).filter(r => Object.values(r).some(v => v));
+  }
+
+  function findCol(row, ...kws) {
+    if (!row) return null;
+    return Object.keys(row).find(k => kws.some(kw => k.includes(kw))) || null;
+  }
+
+  function isRecentMonth(ds) {
+    if (!ds) return false;
+    const d = new Date(ds); if (isNaN(d)) return false;
+    const now = new Date(), tm = now.getMonth(), ty = now.getFullYear();
+    const pm = tm === 0 ? 11 : tm-1, py = tm === 0 ? ty-1 : ty;
+    return (d.getMonth()===tm && d.getFullYear()===ty) || (d.getMonth()===pm && d.getFullYear()===py);
+  }
+
+  function showError(msg) { const b = document.getElementById('error-box'); b.textContent = '⚠ '+msg; b.style.display = 'block'; }
+
+  function buildCSVString(rows, label) {
+    if (!rows.length) return '';
+    const header = 'Name,Email,Latest Shift Date,Minutes Clocked In Early,Risk Shifts (90d),Warning Tier';
+    const lines = [header, ...rows.map(r => [r.name,r.email,r.date,r.mins,r.risk,label].map(v=>`"${v}"`).join(','))];
+    return lines.join('\n');
+  }
+
+  function runBucketing() {
+    document.getElementById('error-box').style.display = 'none';
+    document.getElementById('csv-export-box').style.display = 'none';
+    if (!csvData.main) { showError('Please drop the main export CSV first.'); return; }
+    const main = parseCSV(csvData.main);
+    const w1 = csvData.w1 ? parseCSV(csvData.w1) : [];
+    const w2 = csvData.w2 ? parseCSV(csvData.w2) : [];
+    const w3 = csvData.w3 ? parseCSV(csvData.w3) : [];
+    if (!main.length) { showError('Main CSV could not be parsed. Make sure it includes a header row.'); return; }
+    const emailCol = findCol(main[0],'email');
+    const dateCol  = findCol(main[0],'shift date','date');
+    const nameCol  = findCol(main[0],'first name','worker first','name');
+    const minsCol  = findCol(main[0],'minutes','mins');
+    const riskCol  = findCol(main[0],'risk');
+    if (!emailCol) { showError('Could not find an email column in the main CSV.'); return; }
+    const recent = main.filter(r => isRecentMonth(r[dateCol]));
+    if (!recent.length) { showError('No rows found for this month or last month. Check that your Shift Date column is formatted correctly.'); return; }
+    const latest = {};
+    recent.forEach(r => {
+      const em = (r[emailCol]||'').toLowerCase().trim(); if (!em) return;
+      const d = new Date(r[dateCol]);
+      if (!latest[em] || d > new Date(latest[em][dateCol])) latest[em] = r;
+    });
+    const buildSet = rows => {
+      if (!rows.length) return new Set();
+      const ec = findCol(rows[0],'email'); if (!ec) return new Set();
+      return new Set(rows.map(r => (r[ec]||'').toLowerCase().trim()).filter(Boolean));
+    };
+    const s1=buildSet(w1), s2=buildSet(w2), s3=buildSet(w3);
+    buckets = { '1st':[], '2nd':[], '3rd':[], 'esc':[] };
+    Object.entries(latest).forEach(([em,r]) => {
+      const entry = { name: r[nameCol]||'—', email: em, date: r[dateCol]||'—', mins: r[minsCol]||'—', risk: r[riskCol]||'—' };
+      if      (s3.has(em)) buckets.esc.push(entry);
+      else if (s2.has(em)) buckets['3rd'].push(entry);
+      else if (s1.has(em)) buckets['2nd'].push(entry);
+      else                 buckets['1st'].push(entry);
+    });
+    document.getElementById('cnt-1st').textContent = buckets['1st'].length;
+    document.getElementById('cnt-2nd').textContent = buckets['2nd'].length;
+    document.getElementById('cnt-3rd').textContent = buckets['3rd'].length;
+    document.getElementById('cnt-esc').textContent = buckets.esc.length;
+    document.getElementById('results').style.display = 'block';
+    showTab(['1st','2nd','3rd','esc'].find(k => buckets[k].length) || '1st');
+    document.getElementById('results').scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  function showTab(key) {
+    activeTab = key;
+    const ac = { '1st':'active-1st','2nd':'active-2nd','3rd':'active-3rd','esc':'active-esc' };
+    const lb = { '1st':'1st warning','2nd':'2nd warning','3rd':'3rd warning','esc':'Escalate' };
+    ['1st','2nd','3rd','esc'].forEach(k => {
+      document.getElementById('tab-'+k).className = 'bucket-card'+(k===key?' '+ac[k]:'');
+    });
+    const rows = buckets[key];
+    document.getElementById('table-label').textContent = lb[key]+' — '+rows.length+' worker'+(rows.length!==1?'s':'');
+    const tbody = document.getElementById('result-body'); tbody.innerHTML = '';
+    document.getElementById('empty-state').style.display = rows.length ? 'none' : 'block';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.name}</td><td class="td-email">${r.email}</td><td class="td-muted">${r.date}</td><td class="td-mins">${r.mins}</td><td class="td-muted">${r.risk}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('csv-export-box').style.display = 'none';
+    document.getElementById('copy-success').style.display = 'none';
+  }
+
+  function getCSVLabel() {
+    return { '1st':'1st Warning','2nd':'2nd Warning','3rd':'3rd Warning','esc':'Escalate' }[activeTab];
+  }
+
+  function showCSVExport() {
+    const rows = buckets[activeTab];
+    const box = document.getElementById('csv-export-box');
+    const ta = document.getElementById('csv-textarea');
+    if (!rows.length) { ta.value = 'No workers in this bucket.'; }
+    else { ta.value = buildCSVString(rows, getCSVLabel()); }
+    box.style.display = 'block';
+    document.getElementById('copy-success').style.display = 'none';
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    ta.select();
+  }
+
+  function copyCSV() {
+    const ta = document.getElementById('csv-textarea');
+    ta.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch(e) {}
+    if (!copied && navigator.clipboard) {
+      navigator.clipboard.writeText(ta.value).then(() => {
+        document.getElementById('copy-success').style.display = 'inline';
+        setTimeout(() => { document.getElementById('copy-success').style.display = 'none'; }, 2000);
+      });
+      return;
+    }
+    if (copied) {
+      document.getElementById('copy-success').style.display = 'inline';
+      setTimeout(() => { document.getElementById('copy-success').style.display = 'none'; }, 2000);
+    }
+  }
+
+  function downloadCSV() {
+    const rows = buckets[activeTab]; if (!rows.length) return;
+    const label = getCSVLabel();
+    const csvStr = buildCSVString(rows, label);
+    const filename = label.replace(' ','_') + '_' + new Date().toISOString().slice(0,10) + '.csv';
+    // Method 1: Blob + anchor
+    try {
+      const blob = new Blob([csvStr], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+      return;
+    } catch(e) {}
+    // Method 2: data URI fallback
+    try {
+      const uri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvStr);
+      const a = document.createElement('a');
+      a.href = uri; a.download = filename; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); }, 200);
+      return;
+    } catch(e) {}
+    // Method 3: show the CSV box as last resort
+    showCSVExport();
+  }
+</script>
+</body>
+</html>
